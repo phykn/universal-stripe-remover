@@ -10,7 +10,6 @@ _N_VARS = 1 + _N
 
 
 class UniversalStripeRemover:
-
     def __init__(
         self,
         mu1: float = 0.33,
