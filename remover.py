@@ -2,11 +2,7 @@ import math
 import torch
 import torch.nn.functional as TF
 
-from typing import Any
-from typing import List
-from typing import Optional
-from typing import Tuple
-from typing import Union
+from typing import Any, List, Optional, Tuple, Union
 
 
 _N = 5
