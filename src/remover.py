@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn.functional as TF
 
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Optional, Tuple, Union
 
 
 _N = 5
@@ -14,7 +14,7 @@ class UniversalStripeRemover:
         self,
         mu1: float = 0.33,
         mu2: float = 0.003,
-        device: Optional[Union[torch.device, str]] = None
+        device: Optional[Union[torch.device, str]] = None,
     ) -> None:
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.mu1 = mu1
@@ -22,20 +22,22 @@ class UniversalStripeRemover:
         self.tau = 0.35
         self.sigma = 0.35
 
+
     def process(
         self,
         image: Union[torch.Tensor, Any],
         iterations: int = 500,
         tol: float = 1e-5,
         proj: bool = True,
-        verbose: bool = True
+        verbose: bool = True,
     ) -> torch.Tensor:
         x = self._to_tensor(x=image)
         squeeze = x.dim() == 2
+
         if squeeze:
             x = x.unsqueeze(0)
 
-        result = self._solve(
+        res = self._solve(
             data = x,
             iterations = iterations,
             tol = tol,
@@ -43,7 +45,8 @@ class UniversalStripeRemover:
             verbose = verbose
         )
 
-        return result.squeeze(0) if squeeze else result
+        return res.squeeze(0) if squeeze else res
+
 
     def process_tiled(
         self,
@@ -53,9 +56,10 @@ class UniversalStripeRemover:
         tol: float = 1e-5,
         overlap: int = 64,
         proj: bool = True,
-        verbose: bool = True
+        verbose: bool = True,
     ) -> torch.Tensor:
         data = self._to_tensor(x=image)
+
         if data.dim() == 3:
             data = data.squeeze(0)
 
@@ -69,17 +73,15 @@ class UniversalStripeRemover:
             )
 
         h, w = data.shape
-
         data = self._reflect_pad(
             t = data,
             pad_bottom = (n - h % n) % n,
             pad_right = (n - w % n) % n
         )
+
         hp, wp = data.shape
         th_core, tw_core = hp // n, wp // n
-
-        ov = min(overlap, th_core // 4, tw_core // 4)
-        ov = max(ov, 0)
+        ov = max(min(overlap, th_core // 4, tw_core // 4), 0)
 
         data = self._reflect_pad(
             t = data,
@@ -90,13 +92,13 @@ class UniversalStripeRemover:
         )
 
         th, tw = th_core + 2 * ov, tw_core + 2 * ov
-
         tiles = [
             data[i * th_core : i * th_core + th, j * tw_core : j * tw_core + tw]
             for i in range(n)
             for j in range(n)
         ]
         batch = torch.stack(tensors=tiles)
+
         if verbose:
             print(f"Tiling {n}x{n}: {n * n} tiles of {th}x{tw}, overlap={ov}")
 
@@ -118,7 +120,9 @@ class UniversalStripeRemover:
             wsum[y : y + th, x : x + tw] += weight
 
         canvas /= wsum.clamp(min=1e-9)
+
         return canvas[ov : ov + hp, ov : ov + wp][:h, :w]
+
 
     def _solve(
         self,
@@ -126,7 +130,7 @@ class UniversalStripeRemover:
         iterations: int,
         tol: float,
         proj: bool,
-        verbose: bool
+        verbose: bool,
     ) -> torch.Tensor:
         data = data.to(device=self.device, dtype=torch.float32)
         ts = self.tau * self.sigma
@@ -157,6 +161,7 @@ class UniversalStripeRemover:
                     print(f"\rIteration: {k + 1} / {iterations}", end="")
 
                 self._adj_grad(target=u, ph=ph_, pv=pv_, a=ts)
+
                 for i in range(_N):
                     self._adj_dir(target=s[i], q=q_ext[i], mode=i, a=ts)
                     s[i].sub_(r_ext[i], alpha=ts)
@@ -182,7 +187,7 @@ class UniversalStripeRemover:
 
                 zh = ph + self._fwd(x=u, dim=1)
                 zv = pv + self._fwd(x=u, dim=2)
-                norm = torch.sqrt(input=zh * zh + zv * zv).clamp_(min=eps)
+                norm = torch.sqrt(zh * zh + zv * zv).clamp_(min=eps)
                 scale = (lam / norm).clamp_(max=1.0)
                 ph = zh.mul_(scale)
                 pv = zv.mul_(scale)
@@ -191,11 +196,11 @@ class UniversalStripeRemover:
 
                 for i in range(_N):
                     q_ext[i].copy_(q_list[i])
-                    q_list[i] = (q_list[i] + self._dir_diff(x=s[i], mode=i)).clamp_(min=-qc, max=qc)
+                    q_list[i] = (q_list[i] + self._dir_diff(x=s[i], mode=i)).clamp(min=-qc, max=qc)
                     q_ext[i].mul_(-1).add_(q_list[i], alpha=2)
 
                     r_ext[i].copy_(r_list[i])
-                    r_list[i] = (r_list[i] + s[i]).clamp_(min=-rc, max=rc)
+                    r_list[i] = (r_list[i] + s[i]).clamp(min=-rc, max=rc)
                     r_ext[i].mul_(-1).add_(r_list[i], alpha=2)
 
                 if k > 0 and k % 20 == 0:
@@ -209,21 +214,25 @@ class UniversalStripeRemover:
 
         if verbose:
             print("")
+
         return u.cpu()
+
 
     @staticmethod
     def _fwd(
         x: torch.Tensor,
-        dim: int
+        dim: int,
     ) -> torch.Tensor:
         return x.diff(dim=dim, append=x.narrow(dim=dim, start=x.size(dim) - 1, length=1))
+
 
     @staticmethod
     def _dir_diff(
         x: torch.Tensor,
-        mode: int
+        mode: int,
     ) -> torch.Tensor:
         out = torch.zeros_like(input=x)
+
         if mode == 0:
             out[:, :-1, :] = x[:, 1:, :] - x[:, :-1, :]
         elif mode == 1:
@@ -234,14 +243,16 @@ class UniversalStripeRemover:
             out[:, :-2, 1:] = x[:, 2:, :-1] - x[:, :-2, 1:]
         elif mode == 4:
             out[:, :-1, 1:] = x[:, 1:, :-1] - x[:, :-1, 1:]
+
         return out
+
 
     @staticmethod
     def _adj_1d(
         target: torch.Tensor,
         p: torch.Tensor,
         dim: int,
-        a: float
+        a: float,
     ) -> None:
         s = [slice(None)] * 3
         s[dim] = 0
@@ -257,23 +268,25 @@ class UniversalStripeRemover:
         s2[dim] = -2
         target[tuple(s)].sub_(p[tuple(s2)], alpha=a)
 
+
     @classmethod
     def _adj_grad(
         cls,
         target: torch.Tensor,
         ph: torch.Tensor,
         pv: torch.Tensor,
-        a: float
+        a: float,
     ) -> None:
         cls._adj_1d(target=target, p=ph, dim=1, a=a)
         cls._adj_1d(target=target, p=pv, dim=2, a=a)
+
 
     @staticmethod
     def _adj_dir(
         target: torch.Tensor,
         q: torch.Tensor,
         mode: int,
-        a: float
+        a: float,
     ) -> None:
         if mode == 0:
             target[:, 1:, :].sub_(q[:, :-1, :], alpha=a)
@@ -291,20 +304,25 @@ class UniversalStripeRemover:
             target[:, 1:, :-1].sub_(q[:, :-1, 1:], alpha=a)
             target[:, :-1, 1:].add_(q[:, :-1, 1:], alpha=a)
 
+
     def _to_tensor(
         self,
-        x: Any
+        x: Any,
     ) -> torch.Tensor:
         if not isinstance(x, torch.Tensor):
             x = torch.tensor(data=x)
+
         return x.to(dtype=torch.float32)
+
 
     @staticmethod
     def _zeros2(
-        ref: torch.Tensor
+        ref: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         z = torch.zeros_like(input=ref)
+
         return z, z.clone()
+
 
     @staticmethod
     def _reflect_pad(
@@ -312,7 +330,7 @@ class UniversalStripeRemover:
         pad_top: int = 0,
         pad_bottom: int = 0,
         pad_left: int = 0,
-        pad_right: int = 0
+        pad_right: int = 0,
     ) -> torch.Tensor:
         if pad_top == 0 and pad_bottom == 0 and pad_left == 0 and pad_right == 0:
             return t
@@ -323,17 +341,20 @@ class UniversalStripeRemover:
             mode = "reflect"
         ).squeeze(0)
 
+
     @staticmethod
     def _cosine_window(
         h: int,
         w: int,
-        ov: int
+        ov: int,
     ) -> torch.Tensor:
         win = torch.ones(h, w)
+
         if ov > 0:
             ramp = 0.5 * (1.0 - torch.cos(input=torch.linspace(start=0, end=math.pi, steps=ov)))
             win[:ov, :] *= ramp[:, None]
             win[-ov:, :] *= ramp.flip(dims=(0,))[:, None]
             win[:, :ov] *= ramp[None, :]
             win[:, -ov:] *= ramp.flip(dims=(0,))[None, :]
+
         return win

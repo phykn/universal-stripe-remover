@@ -94,10 +94,10 @@ The **cosine blending window** ensures smooth transitions at tile boundaries: th
 import torch
 import numpy as np
 from PIL import Image
-from remover import UniversalStripeRemover
+from src.remover import UniversalStripeRemover
 
 # Load image
-img = np.array(Image.open("sample.png").convert("L"), dtype=np.float32) / 255.0
+img = np.array(Image.open("asset/sample.png").convert("L"), dtype=np.float32) / 255.0
 F = torch.from_numpy(img)
 
 # De-stripe (full image)
@@ -148,7 +148,7 @@ Split into *n × n* tiles → batch-process → reassemble with cosine blending.
 
 ## Validation
 
-All correctness guarantees are verified in `main.ipynb`:
+All correctness guarantees are verified in `test.ipynb`:
 
 ### Mathematical Correctness
 
@@ -180,9 +180,9 @@ This is the fundamental requirement for PDHGMp convergence. If the adjoint is wr
 
 | File | Description |
 |------|-------------|
-| `remover.py` | Core algorithm — `UniversalStripeRemover` class (~350 lines) |
-| `main.ipynb` | Test notebook — 7 sections covering all validations above |
-| `sample.png` | Example test image with stripe artifacts |
+| `src/remover.py` | Core algorithm — `UniversalStripeRemover` class (~350 lines) |
+| `test.ipynb` | Test notebook — 7 sections covering all validations above |
+| `asset/sample.png` | Example test image with stripe artifacts |
 
 ## References
 
